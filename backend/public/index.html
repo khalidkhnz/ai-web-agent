@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Agent Frontend with Streaming</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      .chat-container {
+        height: 400px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        padding: 10px;
+        margin-bottom: 20px;
+        background-color: #fafafa;
+      }
+      .message {
+        margin: 10px 0;
+        padding: 10px;
+        border-radius: 5px;
+      }
+      .user-message {
+        background-color: #007bff;
+        color: white;
+        text-align: right;
+      }
+      .agent-message {
+        background-color: #e9ecef;
+        color: #333;
+      }
+      .streaming-message {
+        background-color: #e9ecef;
+        color: #333;
+        border-left: 3px solid #007bff;
+        position: relative;
+      }
+      .streaming-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background-color: #007bff;
+        border-radius: 50%;
+        animation: pulse 1.5s infinite;
+        margin-left: 5px;
+      }
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+      .system-message {
+        background-color: #28a745;
+        color: white;
+        font-style: italic;
+      }
+      .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px;
+        border-radius: 5px;
+        color: white;
+        z-index: 1000;
+      }
+      .notification.info {
+        background-color: #17a2b8;
+      }
+      .notification.success {
+        background-color: #28a745;
+      }
+      .notification.warning {
+        background-color: #ffc107;
+        color: #333;
+      }
+      .notification.error {
+        background-color: #dc3545;
+      }
+      .input-container {
+        display: flex;
+        gap: 10px;
+      }
+      .input-container input {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+      }
+      .input-container button {
+        padding: 10px 20px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .input-container button:hover {
+        background-color: #0056b3;
+      }
+      .input-container button:disabled {
+        background-color: #6c757d;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-bottom: 10px;
+        padding: 10px;
+        border-radius: 5px;
+        text-align: center;
+      }
+      .status.connected {
+        background-color: #d4edda;
+        color: #155724;
+      }
+      .status.disconnected {
+        background-color: #f8d7da;
+        color: #721c24;
+      }
+      .streaming-badge {
+        background-color: #007bff;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        margin-left: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🤖 AI Agent Frontend with Streaming</h1>
+      <div id="status" class="status disconnected">Disconnected</div>
+
+      <div id="chat-container" class="chat-container"></div>
+
+      <div class="input-container">
+        <input
+          type="text"
+          id="messageInput"
+          placeholder="Type your message here..."
+        />
+        <button id="sendButton" onclick="sendMessage()">Send</button>
+      </div>
+
+      <div style="margin-top: 20px">
+        <h3>Try these natural language commands:</h3>
+        <ul>
+          <li>"take me to the dashboard" - Navigation</li>
+          <li>"go to my profile" - Navigation</li>
+          <li>"show me a success message" - Notification</li>
+          <li>"display a warning" - Notification</li>
+          <li>"open a modal" - UI Action</li>
+          <li>"refresh the data" - UI Action</li>
+          <li>"tell me what you can do" - General help</li>
+          <li>"explain artificial intelligence" - General conversation</li>
+        </ul>
+        <p>
+          <em
+            >Just talk naturally! The AI understands what you want and will help
+            you automatically.</em
+          >
+        </p>
+      </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+      const chatContainer = document.getElementById("chat-container");
+      const messageInput = document.getElementById("messageInput");
+      const sendButton = document.getElementById("sendButton");
+      const statusDiv = document.getElementById("status");
+
+      let currentStreamingMessage = null;
+      let isStreaming = false;
+
+      // Connection status
+      socket.on("connect", () => {
+        statusDiv.innerHTML =
+          'Connected to AI Agent <span class="streaming-badge">Streaming Enabled</span>';
+        statusDiv.className = "status connected";
+        addMessage(
+          "system",
+          "Connected to AI Agent WebSocket server with streaming support"
+        );
+      });
+
+      socket.on("disconnect", () => {
+        statusDiv.textContent = "Disconnected from AI Agent";
+        statusDiv.className = "status disconnected";
+        addMessage("system", "Disconnected from AI Agent WebSocket server");
+      });
+
+      // Handle regular agent responses (non-streaming)
+      socket.on("agentResponse", (data) => {
+        addMessage("agent", data.message);
+      });
+
+      // Handle streaming events
+      socket.on("streamStart", (data) => {
+        console.log("Stream started:", data.messageId);
+        isStreaming = true;
+        sendButton.disabled = true;
+        sendButton.textContent = "Streaming...";
+
+        // Create streaming message container
+        currentStreamingMessage = document.createElement("div");
+        currentStreamingMessage.className = "message streaming-message";
+        currentStreamingMessage.innerHTML =
+          '<span class="streaming-indicator"></span>';
+        chatContainer.appendChild(currentStreamingMessage);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      });
+
+      socket.on("streamChunk", (data) => {
+        if (currentStreamingMessage) {
+          // Remove streaming indicator and add chunk
+          const indicator = currentStreamingMessage.querySelector(
+            ".streaming-indicator"
+          );
+          if (indicator && currentStreamingMessage.textContent.trim() === "") {
+            indicator.remove();
+          }
+
+          currentStreamingMessage.textContent += data.chunk;
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+      });
+
+      socket.on("streamEnd", (data) => {
+        console.log("Stream ended:", data.messageId);
+        isStreaming = false;
+        sendButton.disabled = false;
+        sendButton.textContent = "Send";
+
+        if (currentStreamingMessage) {
+          // Convert streaming message to regular agent message
+          currentStreamingMessage.className = "message agent-message";
+          currentStreamingMessage = null;
+        }
+      });
+
+      // Handle navigation instructions
+      socket.on("navigate", (data) => {
+        addMessage("system", `🔀 Navigation: ${data.path} (${data.page})`);
+        // Here you would implement actual navigation logic
+        // For example: window.location.href = data.path;
+        // Or for SPA: router.push(data.path);
+      });
+
+      // Handle notifications
+      socket.on("notification", (data) => {
+        showNotification(data.message, data.type, data.duration);
+        addMessage("system", `🔔 Notification: ${data.type} - ${data.message}`);
+      });
+
+      // Handle UI actions
+      socket.on("uiAction", (data) => {
+        addMessage("system", `🎛️ UI Action: ${data.uiAction}`);
+        // Here you would implement actual UI actions
+        // For example:
+        // if (data.uiAction === 'openModal') openModal(data.payload);
+        // if (data.uiAction === 'refreshData') refreshData();
+      });
+
+      // Handle errors
+      socket.on("error", (data) => {
+        addMessage("system", `❌ Error: ${data.message}`);
+        isStreaming = false;
+        sendButton.disabled = false;
+        sendButton.textContent = "Send";
+      });
+
+      function addMessage(type, message) {
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `message ${type}-message`;
+        messageDiv.textContent = message;
+        chatContainer.appendChild(messageDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+
+      function sendMessage() {
+        const message = messageInput.value.trim();
+        if (message && !isStreaming) {
+          addMessage("user", message);
+          socket.emit("userMessage", { message });
+          messageInput.value = "";
+        }
+      }
+
+      function showNotification(message, type, duration = 5000) {
+        const notification = document.createElement("div");
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+
+        setTimeout(() => {
+          if (document.body.contains(notification)) {
+            document.body.removeChild(notification);
+          }
+        }, duration);
+      }
+
+      // Allow Enter key to send message
+      messageInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && !isStreaming) {
+          sendMessage();
+        }
+      });
+
+      // Prevent sending messages while streaming
+      messageInput.addEventListener("input", () => {
+        if (isStreaming) {
+          messageInput.disabled = true;
+        } else {
+          messageInput.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
